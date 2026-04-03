@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>无限画布画画板</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f3f4f6;
+    }
+
+    #app {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .toolbar {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: rgba(255,255,255,0.95);
+      border-bottom: 1px solid #e5e7eb;
+      backdrop-filter: blur(8px);
+      z-index: 20;
+      flex-wrap: wrap;
+    }
+
+    .toolbar-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-right: 12px;
+      border-right: 1px solid #e5e7eb;
+    }
+
+    .toolbar-group:last-child { border-right: none; }
+    button, input, select { font: inherit; }
+
+    button {
+      border: 1px solid #d1d5db;
+      background: #fff;
+      border-radius: 10px;
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: 0.15s ease;
+    }
+
+    button:hover { background: #f9fafb; }
+    button.active { background: #111827; color: white; border-color: #111827; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    input[type="color"] {
+      width: 42px;
+      height: 42px;
+      border: none;
+      background: transparent;
+      padding: 0;
+      cursor: pointer;
+    }
+
+    input[type="range"] { width: 120px; }
+
+    input[type="text"], select {
+      height: 38px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      padding: 0 10px;
+      background: #fff;
+    }
+
+    .workspace {
+      position: relative;
+      flex: 1;
+      overflow: hidden;
+      background:
+        linear-gradient(90deg, rgba(0,0,0,0.05) 1px, transparent 1px),
+        linear-gradient(rgba(0,0,0,0.05) 1px, transparent 1px);
+      background-size: 40px 40px;
+      cursor: crosshair;
+    }
+
+    .hint {
+      position: absolute;
+      right: 16px;
+      bottom: 16px;
+      background: rgba(17, 24, 39, 0.85);
+      color: #fff;
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      line-height: 1.5;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    .zoom-label { min-width: 58px; text-align: center; font-weight: 700; }
+    .tool-label { min-width: 72px; font-weight: 700; }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+
+    .spacer { flex: 1; }
+
+    .text-overlay {
+      position: absolute;
+      z-index: 30;
+      min-width: 160px;
+      min-height: 44px;
+      border: 1px solid #2563eb;
+      outline: none;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.98);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      white-space: pre-wrap;
+      overflow: hidden;
+      line-height: 1.4;
+    }
+
+    .text-overlay:empty::before {
+      content: attr(data-placeholder);
+      color: #9ca3af;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button id="drawBtn" class="active">画笔</button>
+        <button id="eraserBtn">橡皮擦</button>
+        <button id="textBtn">文字</button>
+        <button id="shapeBtn">图形</button>
+        <button id="selectBtn">选择</button>
+        <button id="panBtn">拖动画布</button>
+        <button id="clearBtn">清空</button>
+      </div>
+
+      <div class="toolbar-group">
+        <button id="undoBtn">撤销</button>
+        <button id="redoBtn">重做</button>
+        <button id="deleteBtn">删除选中</button>
+        <button id="exportBtn">导出 PNG</button>
+      </div>
+
+      <div class="toolbar-group">
+        <span class="tool-label" id="toolLabel">当前：画笔</span>
+      </div>
+
+      <div class="toolbar-group">
+        <label>图形</label>
+        <select id="shapeType">
+          <option value="rect">矩形</option>
+          <option value="ellipse">椭圆</option>
+          <option value="line">直线</option>
+          <option value="arrow">箭头</option>
+        </select>
+      </div>
+
+      <div class="toolbar-group">
+        <label>颜色</label>
+        <input id="colorPicker" type="color" value="#111111" />
+      </div>
+
+      <div class="toolbar-group">
+        <label>粗细</label>
+        <input id="brushSize" type="range" min="1" max="80" value="4" />
+        <span id="brushSizeLabel">4px</span>
+      </div>
+
+      <div class="toolbar-group">
+        <label>字号</label>
+        <input id="fontSize" type="range" min="12" max="96" value="24" />
+        <span id="fontSizeLabel">24px</span>
+      </div>
+
+      <div class="toolbar-group">
+        <label>缩放</label>
+        <input id="zoomSlider" type="range" min="100" max="800" step="10" value="100" />
+        <span class="zoom-label" id="zoomLabel">100%</span>
+        <button id="zoomOutBtn">-</button>
+        <button id="zoomInBtn">+</button>
+        <button id="resetViewBtn">重置视图</button>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="toolbar-group">
+        <span>选择模式可拖动/删除文字和图形；双击文字可编辑</span>
+      </div>
+    </div>
+
+    <div id="workspace" class="workspace">
+      <canvas id="canvas"></canvas>
+      <div class="hint">
+        选择模式可单击选中对象并拖动<br>
+        Delete / Backspace 删除选中对象<br>
+        双击已有文字可重新编辑<br>
+        滚轮缩放（100% - 800%）<br>
+        按住空格拖动画布
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const workspace = document.getElementById('workspace');
+
+    const drawBtn = document.getElementById('drawBtn');
+    const eraserBtn = document.getElementById('eraserBtn');
+    const textBtn = document.getElementById('textBtn');
+    const shapeBtn = document.getElementById('shapeBtn');
+    const selectBtn = document.getElementById('selectBtn');
+    const panBtn = document.getElementById('panBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const undoBtn = document.getElementById('undoBtn');
+    const redoBtn = document.getElementById('redoBtn');
+    const deleteBtn = document.getElementById('deleteBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const colorPicker = document.getElementById('colorPicker');
+    const brushSize = document.getElementById('brushSize');
+    const brushSizeLabel = document.getElementById('brushSizeLabel');
+    const shapeType = document.getElementById('shapeType');
+    const fontSize = document.getElementById('fontSize');
+    const fontSizeLabel = document.getElementById('fontSizeLabel');
+    const zoomSlider = document.getElementById('zoomSlider');
+    const zoomLabel = document.getElementById('zoomLabel');
+    const zoomOutBtn = document.getElementById('zoomOutBtn');
+    const zoomInBtn = document.getElementById('zoomInBtn');
+    const resetViewBtn = document.getElementById('resetViewBtn');
+    const toolLabel = document.getElementById('toolLabel');
+
+    let dpr = Math.max(window.devicePixelRatio || 1, 1);
+    let view = { scale: 1, offsetX: 0, offsetY: 0 };
+    let mode = 'draw';
+    let isDrawing = false;
+    let isPanning = false;
+    let isShaping = false;
+    let isDraggingSelection = false;
+    let spacePressed = false;
+    let panStartX = 0;
+    let panStartY = 0;
+    let selectionDragLast = null;
+
+    const objects = [];
+    const redoStack = [];
+    let currentObject = null;
+    let draftShape = null;
+    let editingTextOverlay = null;
+    let editingTextMeta = null;
+    let selectedObjectIndex = -1;
+
+    function clone(obj) {
+      return JSON.parse(JSON.stringify(obj));
+    }
+
+    function resizeCanvas() {
+      const rect = workspace.getBoundingClientRect();
+      dpr = Math.max(window.devicePixelRatio || 1, 1);
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
+      canvas.style.width = rect.width + 'px';
+      canvas.style.height = rect.height + 'px';
+      updateTextOverlayPosition();
+      redraw();
+    }
+
+    function updateToolbar() {
+      drawBtn.classList.toggle('active', mode === 'draw');
+      eraserBtn.classList.toggle('active', mode === 'erase');
+      textBtn.classList.toggle('active', mode === 'text');
+      shapeBtn.classList.toggle('active', mode === 'shape');
+      selectBtn.classList.toggle('active', mode === 'select');
+      panBtn.classList.toggle('active', mode === 'pan');
+      brushSizeLabel.textContent = brushSize.value + 'px';
+      fontSizeLabel.textContent = fontSize.value + 'px';
+      const zoomPercent = Math.round(view.scale * 100);
+      zoomSlider.value = zoomPercent;
+      zoomLabel.textContent = zoomPercent + '%';
+      undoBtn.disabled = objects.length === 0;
+      redoBtn.disabled = redoStack.length === 0;
+      deleteBtn.disabled = selectedObjectIndex < 0;
+
+      const labelMap = {
+        draw: '当前：画笔',
+        erase: '当前：橡皮擦',
+        text: '当前：文字',
+        shape: '当前：图形',
+        select: '当前：选择',
+        pan: '当前：拖动'
+      };
+      toolLabel.textContent = labelMap[mode] || '当前：画笔';
+
+      if (mode === 'pan' || spacePressed) workspace.style.cursor = 'grab';
+      else if (mode === 'text') workspace.style.cursor = 'text';
+      else if (mode === 'select') workspace.style.cursor = isDraggingSelection ? 'grabbing' : 'default';
+      else workspace.style.cursor = 'crosshair';
+    }
+
+    function screenToWorld(x, y) {
+      return { x: (x - view.offsetX) / view.scale, y: (y - view.offsetY) / view.scale };
+    }
+
+    function worldToScreen(x, y) {
+      return { x: x * view.scale + view.offsetX, y: y * view.scale + view.offsetY };
+    }
+
+    function clearRedo() {
+      redoStack.length = 0;
+    }
+
+    function drawStroke(targetCtx, obj) {
+      const pts = obj.points;
+      if (!pts.length) return;
+      targetCtx.save();
+      targetCtx.beginPath();
+      targetCtx.lineCap = 'round';
+      targetCtx.lineJoin = 'round';
+      targetCtx.lineWidth = obj.size;
+      targetCtx.globalCompositeOperation = obj.tool === 'erase' ? 'destination-out' : 'source-over';
+      targetCtx.strokeStyle = obj.tool === 'erase' ? 'rgba(0,0,0,1)' : obj.color;
+      targetCtx.moveTo(pts[0].x, pts[0].y);
+      if (pts.length === 1) {
+        targetCtx.lineTo(pts[0].x + 0.01, pts[0].y + 0.01);
+      } else {
+        for (let i = 1; i < pts.length; i++) targetCtx.lineTo(pts[i].x, pts[i].y);
+      }
+      targetCtx.stroke();
+      targetCtx.restore();
+    }
+
+    function drawArrowHead(targetCtx, x1, y1, x2, y2, size) {
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      const head = Math.max(10, size * 3);
+      targetCtx.beginPath();
+      targetCtx.moveTo(x2, y2);
+      targetCtx.lineTo(x2 - head * Math.cos(angle - Math.PI / 6), y2 - head * Math.sin(angle - Math.PI / 6));
+      targetCtx.moveTo(x2, y2);
+      targetCtx.lineTo(x2 - head * Math.cos(angle + Math.PI / 6), y2 - head * Math.sin(angle + Math.PI / 6));
+      targetCtx.stroke();
+    }
+
+    function drawShape(targetCtx, obj) {
+      const { x1, y1, x2, y2, size, color, shape } = obj;
+      const left = Math.min(x1, x2);
+      const top = Math.min(y1, y2);
+      const width = Math.abs(x2 - x1);
+      const height = Math.abs(y2 - y1);
+      targetCtx.save();
+      targetCtx.beginPath();
+      targetCtx.lineWidth = size;
+      targetCtx.strokeStyle = color;
+      targetCtx.lineCap = 'round';
+      targetCtx.lineJoin = 'round';
+      if (shape === 'rect') {
+        targetCtx.strokeRect(left, top, width, height);
+      } else if (shape === 'ellipse') {
+        targetCtx.ellipse(left + width / 2, top + height / 2, Math.max(width / 2, 0.5), Math.max(height / 2, 0.5), 0, 0, Math.PI * 2);
+        targetCtx.stroke();
+      } else if (shape === 'line') {
+        targetCtx.moveTo(x1, y1);
+        targetCtx.lineTo(x2, y2);
+        targetCtx.stroke();
+      } else if (shape === 'arrow') {
+        targetCtx.moveTo(x1, y1);
+        targetCtx.lineTo(x2, y2);
+        targetCtx.stroke();
+        drawArrowHead(targetCtx, x1, y1, x2, y2, size);
+      }
+      targetCtx.restore();
+    }
+
+    function measureTextBounds(obj) {
+      const lines = (obj.text || '').split('\n');
+      const maxLen = Math.max(...lines.map(line => line.length), 1);
+      return {
+        width: maxLen * obj.fontSize * 0.62 + 20,
+        height: Math.max(1, lines.length) * obj.fontSize * 1.4 + 16
+      };
+    }
+
+    function drawText(targetCtx, obj) {
+      if (!obj.text) return;
+      targetCtx.save();
+      targetCtx.fillStyle = obj.color;
+      targetCtx.font = `${obj.fontSize}px Arial, PingFang SC, Microsoft YaHei, sans-serif`;
+      targetCtx.textBaseline = 'top';
+      const lines = obj.text.split('\n');
+      const lineHeight = obj.fontSize * 1.4;
+      lines.forEach((line, index) => {
+        targetCtx.fillText(line || ' ', obj.x, obj.y + index * lineHeight);
+      });
+      targetCtx.restore();
+    }
+
+    function getObjectBounds(obj) {
+      if (obj.type === 'stroke') {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        const pad = obj.size / 2 + 8;
+        for (const p of obj.points) {
+          minX = Math.min(minX, p.x - pad);
+          minY = Math.min(minY, p.y - pad);
+          maxX = Math.max(maxX, p.x + pad);
+          maxY = Math.max(maxY, p.y + pad);
+        }
+        return { minX, minY, maxX, maxY };
+      }
+      if (obj.type === 'shape') {
+        const pad = obj.size / 2 + 8;
+        return {
+          minX: Math.min(obj.x1, obj.x2) - pad,
+          minY: Math.min(obj.y1, obj.y2) - pad,
+          maxX: Math.max(obj.x1, obj.x2) + pad,
+          maxY: Math.max(obj.y1, obj.y2) + pad,
+        };
+      }
+      if (obj.type === 'text') {
+        const m = measureTextBounds(obj);
+        return { minX: obj.x - 4, minY: obj.y - 4, maxX: obj.x + m.width, maxY: obj.y + m.height };
+      }
+      return null;
+    }
+
+    function drawSelectionBox(targetCtx, obj) {
+      const b = getObjectBounds(obj);
+      if (!b) return;
+      targetCtx.save();
+      targetCtx.strokeStyle = '#2563eb';
+      targetCtx.lineWidth = 1 / view.scale;
+      targetCtx.setLineDash([8 / view.scale, 6 / view.scale]);
+      targetCtx.strokeRect(b.minX, b.minY, b.maxX - b.minX, b.maxY - b.minY);
+      targetCtx.restore();
+    }
+
+    function drawObject(targetCtx, obj) {
+      if (obj.type === 'stroke') drawStroke(targetCtx, obj);
+      if (obj.type === 'shape') drawShape(targetCtx, obj);
+      if (obj.type === 'text') drawText(targetCtx, obj);
+    }
+
+    function redraw() {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.translate(view.offsetX, view.offsetY);
+      ctx.scale(view.scale, view.scale);
+      for (const obj of objects) drawObject(ctx, obj);
+      if (draftShape) drawObject(ctx, draftShape);
+      if (selectedObjectIndex >= 0 && objects[selectedObjectIndex]) drawSelectionBox(ctx, objects[selectedObjectIndex]);
+    }
+
+    function clearSelection() {
+      selectedObjectIndex = -1;
+      redraw();
+      updateToolbar();
+    }
+
+    function selectObject(index) {
+      selectedObjectIndex = index;
+      redraw();
+      updateToolbar();
+    }
+
+    function beginStroke(clientX, clientY) {
+      clearSelection();
+      const rect = canvas.getBoundingClientRect();
+      const p = screenToWorld(clientX - rect.left, clientY - rect.top);
+      currentObject = { type: 'stroke', tool: mode === 'erase' ? 'erase' : 'draw', color: colorPicker.value, size: Number(brushSize.value), points: [p] };
+      objects.push(currentObject);
+      clearRedo();
+      isDrawing = true;
+      redraw();
+      updateToolbar();
+    }
+
+    function extendStroke(clientX, clientY) {
+      if (!isDrawing || !currentObject) return;
+      const rect = canvas.getBoundingClientRect();
+      const p = screenToWorld(clientX - rect.left, clientY - rect.top);
+      currentObject.points.push(p);
+      redraw();
+    }
+
+    function endStroke() {
+      isDrawing = false;
+      currentObject = null;
+      updateToolbar();
+    }
+
+    function beginShape(clientX, clientY) {
+      clearSelection();
+      const rect = canvas.getBoundingClientRect();
+      const p = screenToWorld(clientX - rect.left, clientY - rect.top);
+      draftShape = { type: 'shape', shape: shapeType.value, color: colorPicker.value, size: Number(brushSize.value), x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+      isShaping = true;
+      redraw();
+    }
+
+    function extendShape(clientX, clientY) {
+      if (!isShaping || !draftShape) return;
+      const rect = canvas.getBoundingClientRect();
+      const p = screenToWorld(clientX - rect.left, clientY - rect.top);
+      draftShape.x2 = p.x;
+      draftShape.y2 = p.y;
+      redraw();
+    }
+
+    function endShape() {
+      if (!isShaping || !draftShape) return;
+      const tiny = Math.abs(draftShape.x2 - draftShape.x1) < 0.5 && Math.abs(draftShape.y2 - draftShape.y1) < 0.5;
+      if (!tiny) {
+        objects.push({ ...draftShape });
+        clearRedo();
+      }
+      draftShape = null;
+      isShaping = false;
+      redraw();
+      updateToolbar();
+    }
+
+    function beginPan(clientX, clientY) {
+      isPanning = true;
+      panStartX = clientX;
+      panStartY = clientY;
+      workspace.style.cursor = 'grabbing';
+    }
+
+    function movePan(clientX, clientY) {
+      if (!isPanning) return;
+      const dx = clientX - panStartX;
+      const dy = clientY - panStartY;
+      panStartX = clientX;
+      panStartY = clientY;
+      view.offsetX += dx;
+      view.offsetY += dy;
+      updateTextOverlayPosition();
+      redraw();
+    }
+
+    function endPan() {
+      isPanning = false;
+      updateToolbar();
+    }
+
+    function setZoom(nextScale, centerX = null, centerY = null) {
+      const oldScale = view.scale;
+      const clamped = Math.min(8, Math.max(1, nextScale));
+      if (clamped === oldScale) return updateToolbar();
+      const rect = canvas.getBoundingClientRect();
+      const cx = centerX ?? rect.width / 2;
+      const cy = centerY ?? rect.height / 2;
+      const worldX = (cx - view.offsetX) / oldScale;
+      const worldY = (cy - view.offsetY) / oldScale;
+      view.scale = clamped;
+      view.offsetX = cx - worldX * view.scale;
+      view.offsetY = cy - worldY * view.scale;
+      updateTextOverlayPosition();
+      redraw();
+      updateToolbar();
+    }
+
+    function zoomByStep(delta, centerX = null, centerY = null) {
+      const currentPercent = Math.round(view.scale * 100);
+      const nextPercent = Math.min(800, Math.max(100, currentPercent + delta));
+      setZoom(nextPercent / 100, centerX, centerY);
+    }
+
+    function moveObjectBy(obj, dx, dy) {
+      if (obj.type === 'text') {
+        obj.x += dx; obj.y += dy;
+      } else if (obj.type === 'shape') {
+        obj.x1 += dx; obj.y1 += dy; obj.x2 += dx; obj.y2 += dy;
+      }
+    }
+
+    function beginSelectionDrag(clientX, clientY) {
+      if (selectedObjectIndex < 0 || !objects[selectedObjectIndex]) return;
+      isDraggingSelection = true;
+      const rect = canvas.getBoundingClientRect();
+      selectionDragLast = screenToWorld(clientX - rect.left, clientY - rect.top);
+      updateToolbar();
+    }
+
+    function moveSelectionDrag(clientX, clientY) {
+      if (!isDraggingSelection || selectedObjectIndex < 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const now = screenToWorld(clientX - rect.left, clientY - rect.top);
+      const dx = now.x - selectionDragLast.x;
+      const dy = now.y - selectionDragLast.y;
+      selectionDragLast = now;
+      moveObjectBy(objects[selectedObjectIndex], dx, dy);
+      redraw();
+    }
+
+    function endSelectionDrag() {
+      if (!isDraggingSelection) return;
+      isDraggingSelection = false;
+      selectionDragLast = null;
+      clearRedo();
+      redraw();
+      updateToolbar();
+    }
+
+    function hitTestText(worldX, worldY, obj) {
+      const m = measureTextBounds(obj);
+      return worldX >= obj.x - 4 && worldX <= obj.x + m.width && worldY >= obj.y - 4 && worldY <= obj.y + m.height;
+    }
+
+    function distancePointToSegment(px, py, x1, y1, x2, y2) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      if (dx === 0 && dy === 0) return Math.hypot(px - x1, py - y1);
+      const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
+      const sx = x1 + t * dx;
+      const sy = y1 + t * dy;
+      return Math.hypot(px - sx, py - sy);
+    }
+
+    function hitTestShape(worldX, worldY, obj) {
+      const tol = Math.max(8, obj.size + 6) / view.scale;
+      if (obj.shape === 'line' || obj.shape === 'arrow') {
+        return distancePointToSegment(worldX, worldY, obj.x1, obj.y1, obj.x2, obj.y2) <= tol;
+      }
+      if (obj.shape === 'rect') {
+        const l = Math.min(obj.x1, obj.x2), r = Math.max(obj.x1, obj.x2), t = Math.min(obj.y1, obj.y2), b = Math.max(obj.y1, obj.y2);
+        const onOuter = worldX >= l - tol && worldX <= r + tol && worldY >= t - tol && worldY <= b + tol;
+        const inInner = worldX > l + tol && worldX < r - tol && worldY > t + tol && worldY < b - tol;
+        return onOuter && !inInner;
+      }
+      if (obj.shape === 'ellipse') {
+        const cx = (obj.x1 + obj.x2) / 2;
+        const cy = (obj.y1 + obj.y2) / 2;
+        const rx = Math.max(Math.abs(obj.x2 - obj.x1) / 2, 0.001);
+        const ry = Math.max(Math.abs(obj.y2 - obj.y1) / 2, 0.001);
+        const d = Math.abs(((worldX - cx) ** 2) / (rx ** 2) + ((worldY - cy) ** 2) / (ry ** 2) - 1);
+        return d <= (tol / Math.max(rx, ry));
+      }
+      return false;
+    }
+
+    function findSelectableObjectAt(worldX, worldY) {
+      for (let i = objects.length - 1; i >= 0; i--) {
+        const obj = objects[i];
+        if (obj.type === 'text' && hitTestText(worldX, worldY, obj)) return i;
+        if (obj.type === 'shape' && hitTestShape(worldX, worldY, obj)) return i;
+      }
+      return -1;
+    }
+
+    function deleteSelectedObject() {
+      if (selectedObjectIndex < 0 || !objects[selectedObjectIndex]) return;
+      objects.splice(selectedObjectIndex, 1);
+      selectedObjectIndex = -1;
+      clearRedo();
+      redraw();
+      updateToolbar();
+    }
+
+    function undo() {
+      commitActiveTextOverlay();
+      if (!objects.length) return;
+      redoStack.push(clone(objects.pop()));
+      if (selectedObjectIndex >= objects.length) selectedObjectIndex = -1;
+      redraw();
+      updateToolbar();
+    }
+
+    function redo() {
+      commitActiveTextOverlay();
+      if (!redoStack.length) return;
+      objects.push(redoStack.pop());
+      redraw();
+      updateToolbar();
+    }
+
+    function exportPNG() {
+      commitActiveTextOverlay();
+      if (!objects.length) {
+        alert('当前没有可导出的内容。');
+        return;
+      }
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const obj of objects) {
+        const b = getObjectBounds(obj);
+        if (!b) continue;
+        minX = Math.min(minX, b.minX);
+        minY = Math.min(minY, b.minY);
+        maxX = Math.max(maxX, b.maxX);
+        maxY = Math.max(maxY, b.maxY);
+      }
+      if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+        alert('导出失败：未检测到有效内容。');
+        return;
+      }
+      const width = Math.max(1, Math.ceil(maxX - minX));
+      const height = Math.max(1, Math.ceil(maxY - minY));
+      const exportCanvas = document.createElement('canvas');
+      const exportCtx = exportCanvas.getContext('2d');
+      const exportDpr = Math.max(window.devicePixelRatio || 1, 1);
+      exportCanvas.width = Math.ceil(width * exportDpr);
+      exportCanvas.height = Math.ceil(height * exportDpr);
+      exportCtx.setTransform(exportDpr, 0, 0, exportDpr, 0, 0);
+      exportCtx.clearRect(0, 0, width, height);
+      exportCtx.translate(-minX, -minY);
+      for (const obj of objects) drawObject(exportCtx, obj);
+      const link = document.createElement('a');
+      const now = new Date();
+      const stamp = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0'), '-', String(now.getHours()).padStart(2, '0'), String(now.getMinutes()).padStart(2, '0'), String(now.getSeconds()).padStart(2, '0')].join('');
+      link.download = `canvas-${stamp}.png`;
+      link.href = exportCanvas.toDataURL('image/png');
+      link.click();
+    }
+
+    function setCaretToEnd(el) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    function removeActiveTextOverlayOnly() {
+      if (!editingTextOverlay) return;
+      editingTextOverlay.remove();
+      editingTextOverlay = null;
+      editingTextMeta = null;
+    }
+
+    function commitActiveTextOverlay() {
+      if (!editingTextOverlay) return;
+      const overlay = editingTextOverlay;
+      const meta = editingTextMeta;
+      const text = overlay.innerText.replace(/\n$/, '');
+      const x = Number(overlay.dataset.x);
+      const y = Number(overlay.dataset.y);
+      const size = Number(overlay.dataset.fontSize);
+      const color = overlay.dataset.color;
+      removeActiveTextOverlayOnly();
+      if (!text.trim()) {
+        if (meta && meta.mode === 'edit' && meta.index >= 0 && meta.originalObject) {
+          objects.splice(meta.index, 0, meta.originalObject);
+          selectedObjectIndex = meta.index;
+        }
+        redraw();
+        updateToolbar();
+        return;
+      }
+      const textObj = { type: 'text', text, x, y, fontSize: size, color };
+      if (meta && meta.mode === 'edit' && meta.index >= 0) {
+        objects.splice(meta.index, 0, textObj);
+        selectedObjectIndex = meta.index;
+      } else {
+        objects.push(textObj);
+        selectedObjectIndex = objects.length - 1;
+      }
+      clearRedo();
+      redraw();
+      updateToolbar();
+    }
+
+    function cancelActiveTextOverlay() {
+      if (!editingTextOverlay) return;
+      const meta = editingTextMeta;
+      removeActiveTextOverlayOnly();
+      if (meta && meta.mode === 'edit' && meta.index >= 0 && meta.originalObject) {
+        objects.splice(meta.index, 0, meta.originalObject);
+        selectedObjectIndex = meta.index;
+      }
+      redraw();
+      updateToolbar();
+    }
+
+    function updateTextOverlayPosition() {
+      if (!editingTextOverlay) return;
+      const x = Number(editingTextOverlay.dataset.x);
+      const y = Number(editingTextOverlay.dataset.y);
+      const p = worldToScreen(x, y);
+      editingTextOverlay.style.left = p.x + 'px';
+      editingTextOverlay.style.top = p.y + 'px';
+      editingTextOverlay.style.transform = `scale(${view.scale})`;
+      editingTextOverlay.style.transformOrigin = 'top left';
+    }
+
+    function createTextOverlayAt(worldX, worldY, initialText = '', editMeta = null) {
+      removeActiveTextOverlayOnly();
+      const overlay = document.createElement('div');
+      overlay.className = 'text-overlay';
+      overlay.contentEditable = 'true';
+      overlay.spellcheck = false;
+      overlay.dataset.placeholder = '输入文字';
+      overlay.dataset.x = worldX;
+      overlay.dataset.y = worldY;
+      overlay.dataset.fontSize = editMeta?.originalObject?.fontSize || fontSize.value;
+      overlay.dataset.color = editMeta?.originalObject?.color || colorPicker.value;
+      overlay.style.fontSize = overlay.dataset.fontSize + 'px';
+      overlay.style.color = overlay.dataset.color;
+      overlay.textContent = initialText;
+      workspace.appendChild(overlay);
+      editingTextOverlay = overlay;
+      editingTextMeta = editMeta;
+      updateTextOverlayPosition();
+      requestAnimationFrame(() => { overlay.focus(); setCaretToEnd(overlay); });
+      overlay.addEventListener('pointerdown', (e) => e.stopPropagation());
+    }
+
+    function createTextOverlayFromClient(clientX, clientY) {
+      clearSelection();
+      const rect = canvas.getBoundingClientRect();
+      const p = screenToWorld(clientX - rect.left, clientY - rect.top);
+      createTextOverlayAt(p.x, p.y, '', { mode: 'create' });
+    }
+
+    function findTextObjectAt(worldX, worldY) {
+      for (let i = objects.length - 1; i >= 0; i--) {
+        const obj = objects[i];
+        if (obj.type === 'text' && hitTestText(worldX, worldY, obj)) return { index: i, object: obj };
+      }
+      return null;
+    }
+
+    function editTextObject(hit) {
+      const original = clone(hit.object);
+      objects.splice(hit.index, 1);
+      selectedObjectIndex = -1;
+      redraw();
+      updateToolbar();
+      createTextOverlayAt(original.x, original.y, original.text, { mode: 'edit', index: hit.index, originalObject: original });
+    }
+
+    drawBtn.addEventListener('click', () => { commitActiveTextOverlay(); mode = 'draw'; updateToolbar(); });
+    eraserBtn.addEventListener('click', () => { commitActiveTextOverlay(); mode = 'erase'; updateToolbar(); });
+    textBtn.addEventListener('click', () => { mode = 'text'; updateToolbar(); });
+    shapeBtn.addEventListener('click', () => { commitActiveTextOverlay(); mode = 'shape'; updateToolbar(); });
+    selectBtn.addEventListener('click', () => { commitActiveTextOverlay(); mode = 'select'; updateToolbar(); });
+    panBtn.addEventListener('click', () => { commitActiveTextOverlay(); mode = 'pan'; updateToolbar(); });
+
+    clearBtn.addEventListener('click', () => {
+      removeActiveTextOverlayOnly();
+      objects.length = 0;
+      redoStack.length = 0;
+      draftShape = null;
+      selectedObjectIndex = -1;
+      redraw();
+      updateToolbar();
+    });
+
+    undoBtn.addEventListener('click', undo);
+    redoBtn.addEventListener('click', redo);
+    deleteBtn.addEventListener('click', deleteSelectedObject);
+    exportBtn.addEventListener('click', exportPNG);
+
+    brushSize.addEventListener('input', updateToolbar);
+    fontSize.addEventListener('input', () => {
+      fontSizeLabel.textContent = fontSize.value + 'px';
+      if (editingTextOverlay) {
+        editingTextOverlay.dataset.fontSize = fontSize.value;
+        editingTextOverlay.style.fontSize = fontSize.value + 'px';
+      }
+    });
+    colorPicker.addEventListener('input', () => {
+      if (editingTextOverlay) {
+        editingTextOverlay.dataset.color = colorPicker.value;
+        editingTextOverlay.style.color = colorPicker.value;
+      }
+    });
+
+    zoomSlider.addEventListener('input', e => setZoom(Number(e.target.value) / 100));
+    zoomOutBtn.addEventListener('click', () => zoomByStep(-10));
+    zoomInBtn.addEventListener('click', () => zoomByStep(10));
+    resetViewBtn.addEventListener('click', () => {
+      view.scale = 1; view.offsetX = 0; view.offsetY = 0;
+      updateTextOverlayPosition(); redraw(); updateToolbar();
+    });
+
+    canvas.addEventListener('pointerdown', e => {
+      if (editingTextOverlay && mode !== 'text') commitActiveTextOverlay();
+      canvas.setPointerCapture(e.pointerId);
+      const shouldPan = mode === 'pan' || spacePressed || e.button === 1;
+      if (shouldPan) return beginPan(e.clientX, e.clientY);
+      if (e.button !== 0) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const p = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+
+      if (mode === 'draw' || mode === 'erase') return beginStroke(e.clientX, e.clientY);
+      if (mode === 'shape') return beginShape(e.clientX, e.clientY);
+      if (mode === 'text') return createTextOverlayFromClient(e.clientX, e.clientY);
+      if (mode === 'select') {
+        const hitIndex = findSelectableObjectAt(p.x, p.y);
+        if (hitIndex >= 0) {
+          selectObject(hitIndex);
+          beginSelectionDrag(e.clientX, e.clientY);
+        } else {
+          clearSelection();
+        }
+      }
+    });
+
+    canvas.addEventListener('dblclick', e => {
+      const rect = canvas.getBoundingClientRect();
+      const p = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+      const hit = findTextObjectAt(p.x, p.y);
+      if (hit) {
+        mode = 'text';
+        updateToolbar();
+        editTextObject(hit);
+      }
+    });
+
+    canvas.addEventListener('pointermove', e => {
+      if (isDrawing) extendStroke(e.clientX, e.clientY);
+      else if (isShaping) extendShape(e.clientX, e.clientY);
+      else if (isDraggingSelection) moveSelectionDrag(e.clientX, e.clientY);
+      else if (isPanning) movePan(e.clientX, e.clientY);
+    });
+
+    function finishPointerInteraction() {
+      endStroke();
+      endShape();
+      endSelectionDrag();
+      endPan();
+    }
+
+    canvas.addEventListener('pointerup', finishPointerInteraction);
+    canvas.addEventListener('pointercancel', finishPointerInteraction);
+    canvas.addEventListener('pointerleave', () => {
+      if (isDrawing) endStroke();
+      if (isShaping) endShape();
+      if (isDraggingSelection) endSelectionDrag();
+    });
+
+    workspace.addEventListener('wheel', e => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      zoomByStep(e.deltaY < 0 ? 10 : -10, x, y);
+    }, { passive: false });
+
+    window.addEventListener('pointerdown', e => {
+      if (!editingTextOverlay) return;
+      if (e.target === editingTextOverlay || editingTextOverlay.contains(e.target)) return;
+      if (workspace.contains(e.target)) commitActiveTextOverlay();
+    }, true);
+
+    window.addEventListener('keydown', e => {
+      const isMac = navigator.platform.toUpperCase().includes('MAC');
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (e.code === 'Space' && !spacePressed) {
+        e.preventDefault();
+        spacePressed = true;
+        updateToolbar();
+        return;
+      }
+      if (editingTextOverlay) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          cancelActiveTextOverlay();
+          return;
+        }
+        if (mod && e.key.toLowerCase() === 'enter') {
+          e.preventDefault();
+          commitActiveTextOverlay();
+          return;
+        }
+      }
+      if (mod && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !editingTextOverlay) {
+        if (selectedObjectIndex >= 0) {
+          e.preventDefault();
+          deleteSelectedObject();
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        draftShape = null;
+        isShaping = false;
+        clearSelection();
+      }
+    });
+
+    window.addEventListener('keyup', e => {
+      if (e.code === 'Space') {
+        spacePressed = false;
+        updateToolbar();
+      }
+    });
+
+    window.addEventListener('resize', resizeCanvas);
+
+    resizeCanvas();
+    updateToolbar();
+  </script>
+</body>
+</html>
